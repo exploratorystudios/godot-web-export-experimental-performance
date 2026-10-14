@@ -1,5 +1,6 @@
 name: 🔗 GHA
-on: [push, pull_request, merge_group, workflow_dispatch]
+# Experimental fork: run the full upstream build matrix only on explicit request.
+on: [workflow_dispatch]
 
 concurrency:
   group: ${{ github.workflow }}|${{ github.ref_name }}

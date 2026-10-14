@@ -1,3 +1,5 @@
+> Experimental Godot 4.7.2 web performance snapshot. See [changes, tested template, and build instructions](tools/web_performance/README.md).
+
 # Godot Engine
 
 <p align="center">
