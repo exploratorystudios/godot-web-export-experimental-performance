@@ -1,0 +1,54 @@
+{
+  "stock": {
+    "gpu": "ANGLE (NVIDIA Corporation, NVIDIA GeForce GTX 1650 Ti/PCIe/SSE2, OpenGL 4.5.0)",
+    "errors": []
+  },
+  "patched": {
+    "gpu": "ANGLE (NVIDIA Corporation, NVIDIA GeForce GTX 1650 Ti/PCIe/SSE2, OpenGL 4.5.0)",
+    "errors": []
+  },
+  "changed_pixels": 0,
+  "pixel_count": 1300800,
+  "instance_color_centers": [
+    [
+      255,
+      0,
+      0
+    ],
+    [
+      0,
+      255,
+      0
+    ],
+    [
+      0,
+      0,
+      255
+    ],
+    [
+      255,
+      255,
+      0
+    ],
+    [
+      255,
+      0,
+      0
+    ],
+    [
+      0,
+      255,
+      0
+    ],
+    [
+      0,
+      0,
+      255
+    ],
+    [
+      255,
+      255,
+      0
+    ]
+  ]
+}

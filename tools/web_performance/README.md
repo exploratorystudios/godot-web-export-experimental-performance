@@ -33,6 +33,9 @@ This installs Emscripten and SCons inside `.web-perf-toolchain/`, and writes the
 ZIP and build manifest to `bin/web-performance/`. A cold build recompiles the
 engine and can take tens of minutes. A normal game export reuses the template.
 
+The focused upstream diff is preserved in `engine-changes.patch`; compact
+renderer and position-reporting results are in `validation/`.
+
 ## Validation and limits
 
 Audio buffer tests passed eight checks. Position-reporting tests passed six

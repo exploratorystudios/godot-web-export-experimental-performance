@@ -1,0 +1,12 @@
+{
+  "passed": 6,
+  "tests": [
+    "Every block advances to exactly the stock sample position",
+    "One second at 48 kHz emits 60 reports instead of 375",
+    "Input PCM remains unchanged",
+    "Empty input emits no reports",
+    "Reset preserves stock sample progression",
+    "Restoring per-block reporting takes effect immediately"
+  ],
+  "limitation": "A reduced reporting rate can make main-thread playback position stale by up to approximately one reporting interval; this test does not establish pause/seek precision."
+}
