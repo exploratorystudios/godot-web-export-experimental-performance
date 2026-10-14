@@ -1,0 +1,128 @@
+diff --git a/drivers/gles3/rasterizer_scene_gles3.cpp b/drivers/gles3/rasterizer_scene_gles3.cpp
+index bf41012..96c70ab 100644
+--- a/drivers/gles3/rasterizer_scene_gles3.cpp
++++ b/drivers/gles3/rasterizer_scene_gles3.cpp
+@@ -3181,6 +3181,9 @@ void RasterizerSceneGLES3::_render_list_template(RenderListParameters *p_params,
+ 	SceneShaderGLES3::ShaderVariant prev_variant = SceneShaderGLES3::ShaderVariant::MODE_COLOR;
+ 	SceneShaderGLES3::ShaderVariant shader_variant = SceneShaderGLES3::MODE_COLOR; // Assigned to silence wrong -Wmaybe-initialized
+ 	uint64_t prev_spec_constants = 0;
++	uint32_t prev_model_flags = 0;
++	uint32_t prev_instance_offset = 0;
++	uint32_t prev_layer_mask = 0;
+ 
+ 	// Specializations constants used by all instances in the scene.
+ 	uint64_t base_spec_constants = p_params->spec_constant_base_flags;
+@@ -3680,7 +3683,8 @@ void RasterizerSceneGLES3::_render_list_template(RenderListParameters *p_params,
+ 				}
+ 			}
+ 
+-			if (prev_shader != shader || prev_variant != instance_variant || spec_constants != prev_spec_constants) {
++			const bool shader_changed = prev_shader != shader || prev_variant != instance_variant || spec_constants != prev_spec_constants;
++			if (shader_changed) {
+ 				bool success = material_storage->shaders.scene_shader.version_bind_shader(shader->version, instance_variant, spec_constants);
+ 				if (!success) {
+ 					break;
+@@ -3901,13 +3905,25 @@ void RasterizerSceneGLES3::_render_list_template(RenderListParameters *p_params,
+ 				}
+ 			}
+ 
+-			material_storage->shaders.scene_shader.version_set_uniform(SceneShaderGLES3::MODEL_FLAGS, inst->flags_cache, shader->version, instance_variant, spec_constants);
+-			material_storage->shaders.scene_shader.version_set_uniform(SceneShaderGLES3::INSTANCE_OFFSET, uint32_t(inst->shader_uniforms_offset), shader->version, instance_variant, spec_constants);
++			// Uniforms belong to a shader program. Refresh on every program change, but
++			// avoid repeating identical per-object values within a draw batch.
++			if (shader_changed || prev_model_flags != inst->flags_cache) {
++				material_storage->shaders.scene_shader.version_set_uniform(SceneShaderGLES3::MODEL_FLAGS, inst->flags_cache, shader->version, instance_variant, spec_constants);
++				prev_model_flags = inst->flags_cache;
++			}
++			const uint32_t instance_offset = uint32_t(inst->shader_uniforms_offset);
++			if (shader_changed || prev_instance_offset != instance_offset) {
++				material_storage->shaders.scene_shader.version_set_uniform(SceneShaderGLES3::INSTANCE_OFFSET, instance_offset, shader->version, instance_variant, spec_constants);
++				prev_instance_offset = instance_offset;
++			}
+ 
+ 			if (p_pass_mode == PASS_MODE_MATERIAL) {
+ 				material_storage->shaders.scene_shader.version_set_uniform(SceneShaderGLES3::UV_OFFSET, p_params->uv_offset, shader->version, instance_variant, spec_constants);
+ 			} else if (p_pass_mode == PASS_MODE_COLOR || p_pass_mode == PASS_MODE_COLOR_TRANSPARENT) {
+-				material_storage->shaders.scene_shader.version_set_uniform(SceneShaderGLES3::LAYER_MASK, inst->layer_mask, shader->version, instance_variant, spec_constants);
++				if (shader_changed || prev_layer_mask != inst->layer_mask) {
++					material_storage->shaders.scene_shader.version_set_uniform(SceneShaderGLES3::LAYER_MASK, inst->layer_mask, shader->version, instance_variant, spec_constants);
++					prev_layer_mask = inst->layer_mask;
++				}
+ 			}
+ 
+ 			// Can be index count or vertex count
+diff --git a/drivers/gles3/storage/render_scene_buffers_gles3.cpp b/drivers/gles3/storage/render_scene_buffers_gles3.cpp
+index 296206a..bd59769 100644
+--- a/drivers/gles3/storage/render_scene_buffers_gles3.cpp
++++ b/drivers/gles3/storage/render_scene_buffers_gles3.cpp
+@@ -462,6 +462,7 @@ void RenderSceneBuffersGLES3::_clear_intermediate_buffers() {
+ 
+ void RenderSceneBuffersGLES3::check_backbuffer(bool p_need_color, bool p_need_depth) {
+ 	GLES3::TextureStorage *texture_storage = GLES3::TextureStorage::get_singleton();
++	const bool needs_validation = backbuffer3d.fbo == 0 || (p_need_color && backbuffer3d.color == 0) || (p_need_depth && backbuffer3d.depth == 0);
+ 
+ 	// Setup our back buffer
+ 
+@@ -532,10 +533,14 @@ void RenderSceneBuffersGLES3::check_backbuffer(bool p_need_color, bool p_need_de
+ 		}
+ 	}
+ 
+-	GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+-	if (status != GL_FRAMEBUFFER_COMPLETE) {
+-		_clear_back_buffers();
+-		WARN_PRINT("Could not create 3D back buffers, status: " + texture_storage->get_framebuffer_error(status));
++	// Completeness cannot change while these owned attachments stay unchanged.
++	// On WebGL, querying it every frame can synchronize with the graphics process.
++	if (needs_validation) {
++		GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
++		if (status != GL_FRAMEBUFFER_COMPLETE) {
++			_clear_back_buffers();
++			WARN_PRINT("Could not create 3D back buffers, status: " + texture_storage->get_framebuffer_error(status));
++		}
+ 	}
+ 
+ 	glBindTexture(texture_target, 0);
+diff --git a/platform/web/js/libs/audio.position.worklet.js b/platform/web/js/libs/audio.position.worklet.js
+index 4e512c1..c054180 100644
+--- a/platform/web/js/libs/audio.position.worklet.js
++++ b/platform/web/js/libs/audio.position.worklet.js
+@@ -44,6 +44,10 @@ class GodotPositionReportingProcessor extends AudioWorkletProcessor {
+ 	constructor(...args) {
+ 		super(...args);
+ 		this.position = 0;
++		this.reportFrames = 0;
++		// Position reporting is separate from audio processing. Bound main-thread
++		// message traffic while continuing to count every input sample frame.
++		this.reportInterval = Math.max(1, Math.round(sampleRate / 60));
+ 	}
+ 
+ 	process(inputs, _outputs, parameters) {
+@@ -55,7 +59,11 @@ class GodotPositionReportingProcessor extends AudioWorkletProcessor {
+ 			const input = inputs[0];
+ 			if (input.length > 0) {
+ 				this.position += input[0].length;
+-				this.port.postMessage({ type: 'position', data: this.position });
++				this.reportFrames += input[0].length;
++				if (this.reportFrames >= this.reportInterval) {
++					this.port.postMessage({ type: 'position', data: this.position });
++					this.reportFrames %= this.reportInterval;
++				}
+ 			}
+ 		}
+ 
+diff --git a/platform/web/js/libs/library_godot_audio.js b/platform/web/js/libs/library_godot_audio.js
+index d1c996e..07c6526 100644
+--- a/platform/web/js/libs/library_godot_audio.js
++++ b/platform/web/js/libs/library_godot_audio.js
+@@ -124,6 +124,11 @@ class Sample {
+ 	 * @returns {AudioBuffer}
+ 	 */
+ 	getAudioBuffer() {
++		// Playback nodes do not modify sample PCM. Share matching-channel buffers
++		// instead of allocating and copying them on every start or loop restart.
++		if (this._audioBuffer != null && this._audioBuffer.numberOfChannels === this.numberOfChannels) {
++			return this._audioBuffer;
++		}
+ 		return this._duplicateAudioBuffer();
+ 	}
+ 
